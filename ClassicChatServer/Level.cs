@@ -1,4 +1,6 @@
 ﻿using ICSharpCode.SharpZipLib.GZip;
+using System.IO;
+using System.Xml.Linq;
 
 namespace ClassicChatServer
 {
@@ -26,8 +28,9 @@ namespace ClassicChatServer
 
         DateTime nextAutoSave = DateTime.Now.AddSeconds(300);
 
-        public Level(short width, short height, short length)
+        public Level(string name, short width, short height, short length)
         {
+            Name = name;
             Width = width;
             Height = height;
             Length = length;
@@ -139,40 +142,88 @@ namespace ClassicChatServer
             });
         }
 
-        public string SavePath => $"{Directory.GetCurrentDirectory()}/level/{Name}.lvl";
+        public static string BasePath => $"{Directory.GetCurrentDirectory()}/level";
+        public string SavePath => $"{BasePath}/{Name}.lvl";
         public void Save(string path="")
         {
             if (path == "") path = SavePath;
             if (!Directory.Exists(Directory.GetParent(path).FullName))
                 Directory.CreateDirectory(Directory.GetParent(path).FullName);
             FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+
             fs.Write(BitConverter.GetBytes(Width));
             fs.Write(BitConverter.GetBytes(Height));
             fs.Write(BitConverter.GetBytes(Length));
-            fs.Write(Data);
+            fs.Write(BitConverter.GetBytes(Spawn[0]));
+            fs.Write(BitConverter.GetBytes(Spawn[1]));
+            fs.Write(BitConverter.GetBytes(Spawn[2]));
+
+            var compressedData = new MemoryStream();
+            GZip.Compress(new MemoryStream(Data), compressedData, false);
+            fs.Write(compressedData.ToArray());
 
             fs.Close();
             Console.WriteLine($"Saved the level to {path}");
         }
-        public bool Load(string path="")
+        public static bool Exists(string name)
         {
-            if (path == "") path = SavePath;
+            return File.Exists($"{BasePath}/{name}.lvl");
+        }
+
+        public static Level Gen(string name, short width, short height, short length)
+        {
+            Level level = new Level() { Name = name, Width = width, Height = height, Length = length };
+
+            level.Data = new byte[width * height * length];
+            level.Spawn = new short[] { (short)((level.Width << 5) / 2), (short)(((level.Height << 5) / 2) + 32), (short)((level.Length << 5) / 2) };
+            var grassheight = (height / 2) - 1;
+            for (short x = 0; x < width; x++)
+                for (short y = 0; y < height; y++)
+                    for (short z = 0; z < length; z++)
+                    {
+                        if (y == grassheight)
+                            level.SetBlock(x, y, z, 2);
+                        else if (y < grassheight)
+                            level.SetBlock(x, y, z, 3);
+                        else
+                            level.SetBlock(x, y, z, 0);
+                    }
+            Console.WriteLine($"Generated level of size {width} {height} {length}");
+            level.Save();
+            return level;
+        }
+        public static Level Load(string name="")
+        {
+            if (!Exists(name))
+                return new Level(name, 256, 256, 256);
+ 
+            var lvl = new Level();
+            lvl.Name = name;
+
+            string path = $"{BasePath}/{name}.lvl";
 
             if (!File.Exists(path))
-                return false;
+                return new Level(name, 256, 256, 256);
 
             FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read);
             BinaryReader br = new BinaryReader(fs);
-            Width = br.ReadInt16();
-            Height = br.ReadInt16();
-            Length = br.ReadInt16();
-            Data = br.ReadBytes(Width * Height * Length);
+            lvl.Width = br.ReadInt16();
+            lvl.Height = br.ReadInt16();
+            lvl.Length = br.ReadInt16();
+
+            lvl.Spawn = new short[3] {br.ReadInt16(), br.ReadInt16(), br.ReadInt16()};
+
+            var decompressed = new MemoryStream();
+            GZip.Decompress(new MemoryStream(br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position))), decompressed, false);
+            lvl.Data = decompressed.ToArray();
 
             br.Close();
             fs.Close();
-            Console.WriteLine($"Loaded level from {path}");
-            return true;
+            Console.WriteLine($"Loaded level from {name}");
+            return lvl;
+
         }
+
         public int PackCoords(short x, short y, short z)
         {
             return x + (z * Width) + (y * Width * Length);////(((y) * Length + (z)) * Width + (x));

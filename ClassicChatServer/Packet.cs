@@ -46,7 +46,7 @@ namespace ClassicChatServer
                 }
                 byte[] correctkey = new byte[] { };
                 using (MD5 md5 = MD5.Create())
-                    correctkey = md5.ComputeHash(Encoding.ASCII.GetBytes( Convert.ToHexString(Server.Salt) + name));
+                    correctkey = md5.ComputeHash(Encoding.ASCII.GetBytes(Convert.ToHexString(Server.Salt) + name));
 
                 Console.WriteLine(Convert.ToHexString(correctkey).ToLower());
                 Console.WriteLine(verificationkey);
@@ -58,6 +58,7 @@ namespace ClassicChatServer
                 }
 
                 client.Name = name;
+                client.Rank = Rank.GetRank(name);
 
                 if (data[130] == 0x42) // CPE
                 {
@@ -65,6 +66,7 @@ namespace ClassicChatServer
                     client.SendBytes(Packet.CPEExtInfo(Server.Software, (short)Server.SupportedCPE.Count));
                     foreach (var cpe in Server.SupportedCPE)
                         client.SendBytes(Packet.CPEExtEntry(cpe.Key, cpe.Value));
+                    return;
                 }
 
                 Server.PlayerConnect(client);
@@ -78,11 +80,16 @@ namespace ClassicChatServer
                 byte mode = data[7];
                 byte block = data[8];
 
-                Server.Level.SetBlock(x, y, z, mode == 0x00 ? (byte)0 : block);
+                if (client.Level == null) return;
+                if (block > 65) { client.SendBytes(Packet.SetBlock(x, y, z, client.Level.GetBlock(x, y, z))); return; }
+
+                client.HeldBlock = block;
+                client.Level.SetBlock(x, y, z, mode == 0x00 ? (byte)0 : block);
 
             });// Player set block
 
-            SetPacket(0x08, 10, (Player client, byte[] data) => {
+            SetPacket(0x08, 10, (Player client, byte[] data) =>
+            {
                 short x = Util.ReadShort(data, 2);
                 short y = Util.ReadShort(data, 4);
                 short z = Util.ReadShort(data, 6);
@@ -92,10 +99,14 @@ namespace ClassicChatServer
                 client.Yaw = yaw;
                 client.Pitch = pitch;
                 client.UpdatePos = true;
+
+                if (client.SupportedCPE.Contains("HeldBlock"))
+                    client.HeldBlock = data[1];
             }); // Pos / orientation
 
             //Player Message
-            SetPacket(0x0d, 66, (Player client, byte[] data) => {
+            SetPacket(0x0d, 66, (Player client, byte[] data) =>
+            {
 
                 var msg = Util.ReadString(data, 2);
                 if (!client.CPE || !client.SupportedCPE.Contains("LongerMessages"))
@@ -112,15 +123,33 @@ namespace ClassicChatServer
 
 
             // Ext Info
-            SetPacket(0x10, 67, (Player client, byte[] data) => { client.AppName = Util.ReadString(data, 1); });
+            SetPacket(0x10, 67, (Player client, byte[] data) =>
+            {
+                client.AppName = Util.ReadString(data, 1);
+                client.CPECount = Util.ReadShort(data, 65);
+                Console.WriteLine("Number of cpe: " + client.CPECount.ToString());
+            });
 
             // Ext Entry
             SetPacket(0x11, 69, (Player client, byte[] data) =>
             {
                 var name = Util.ReadString(data, 1);
                 var version = Util.ReadInt(data, 65);
-                if (!Server.SupportedCPE.ContainsKey(name)) return;
+
                 client.SupportedCPE.Add(name);
+
+                if (client.CPECount != client.SupportedCPE.Count) return;
+                if (!client.SupportedCPE.Contains("CustomBlocks")) return;
+                client.SendBytes(Packet.CPECustomBlockSupportLevel(1));
+
+            });
+
+
+            SetPacket(0x13, 2, (Player client, byte[] data) =>
+            {
+                if (client.CPECount != client.SupportedCPE.Count) return;
+                client.CPECount = 0;
+                Server.PlayerConnect(client);
             });
         }
 
@@ -157,6 +186,11 @@ namespace ClassicChatServer
             Array.Copy(Util.EncodeString(name), 0, packet, 2, 64);
             Array.Copy(Util.EncodeString(motd), 0, packet, 66, 64);
             return packet;
+        }
+
+        public static byte[] ServerIdentifyPacket()
+        {
+            return ServerIdentifyPacket(Server.Name, Server.Motd);
         }
         public static byte[] DisconnectPacket(string reason)
         {
@@ -197,7 +231,17 @@ namespace ClassicChatServer
             packet[7] = block;
             return packet;
         }
-        
+        public static byte[] SetBlock(short x, short y, short z, short block)
+        {
+            byte[] packet = new byte[8];
+            packet[0] = 0x06;
+            Util.WriteShort(x, packet, 1);
+            Util.WriteShort(y, packet, 3);
+            Util.WriteShort(z, packet, 5);
+            packet[7] = (byte)block;
+            return packet;
+        }
+
         public static byte[] PlayerSpawn(byte id, string name, short x, short y, short z, byte yaw, byte pitch)
         {
             byte[] packet = new byte[74];
@@ -242,6 +286,20 @@ namespace ClassicChatServer
             Array.Copy(Util.EncodeString(cpeentry), 0, packet, 1, 64);
             Util.WriteInt(version, packet, 64);
             return packet;
+        }
+
+        public static byte[] CPEChangeModel(byte id, string model)
+        {
+            byte[] packet = new byte[66];
+            packet[0] = 0x1D;
+            packet[1] = id;
+            Array.Copy(Util.EncodeString(model), 0, packet, 2, 64);
+            return packet;
+        }
+
+        public static byte[] CPECustomBlockSupportLevel(byte level)
+        {
+            return new byte[2] { 0x13, level };
         }
     }
 

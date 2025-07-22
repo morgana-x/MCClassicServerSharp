@@ -12,8 +12,12 @@ namespace ClassicChatServer
         public string ColouredName => $"{Colour}{Name}";
         public string Colour = "&7";
         public string AppName = "Classic 030";
-        public int Rank = 0;
+
+        public int Rank = 0;// { get { return Rank; } set { Rank = value; ClassicChatServer.Rank.Ranks[Name] = value; } }
+
         public bool CPE;
+        public int CPECount = 0;
+
         public List<string> SupportedCPE = new List<string>();
 
         public string TypingMessage = "";
@@ -24,6 +28,10 @@ namespace ClassicChatServer
 
         public volatile bool UpdatePos = false;
         public Level Level;
+
+        public short HeldBlock = 0;
+
+        public string Model = "Humanoid";
         public Player(TcpClient client)
         {
             if (client == null) return;
@@ -57,10 +65,23 @@ namespace ClassicChatServer
 
         public void Disconnect()
         {
-            if (TCPClient != null && TCPClient.Connected) TCPClient.Close();
+            try
+            {
+                if (TCPClient != null && TCPClient.Connected) TCPClient.Close();
+            }
+            catch (Exception ex)
+            { 
+                System.Console.WriteLine(ex.ToString()); 
+            }
             Server.PlayerDisconnect(this);
         }
 
+        public void SetRank(int rank)
+        {
+            this.Rank = rank;
+            ClassicChatServer.Rank.Ranks[Name] = rank;
+            ClassicChatServer.Rank.Save();
+        }
 
         public void SetLevel(Level level)
         {

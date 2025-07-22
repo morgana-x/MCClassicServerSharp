@@ -13,7 +13,7 @@ namespace ClassicChatServer
 
         public static int MaxMessageLength = 256;
 
-        public static bool Public = true;
+        public static bool Public = false;
         public static bool Verify = true;
 
         public static string Name = "Terrible Server";
@@ -28,12 +28,15 @@ namespace ClassicChatServer
 
         static HttpClient HeartbeatClient = new HttpClient() { BaseAddress = new Uri("https://www.classicube.net/server/heartbeat/") };
 
-        public static Level Level = new Level(256, 256, 256);
+        public static Level Level = new Level("main", 256, 256 ,256);
 
         public static Dictionary<string, int> SupportedCPE = new Dictionary<string, int>()
         {
             ["LongerMessages"] = 1,
-            ["FullCP437"] = 1
+            ["FullCP437"] = 1,
+            ["CustomBlocks"] = 1,
+            ["HeldBlock"] = 1,
+            ["ChangeModel"] = 1,
         };
 
         public static int GetFreeId()
@@ -120,9 +123,11 @@ namespace ClassicChatServer
 
         public static void PlayerDisconnect(Player player)
         {
+            if (player == null) return;
             if (!Players.ContainsKey(player.Id)) return;
             Players.Remove(player.Id);
-            player.Level.RemovePlayer(player);
+            if (player.Level != null)
+                player.Level.RemovePlayer(player);
             Broadcast($"{player.ColouredName}&e has &cdisconnected!");
         }
 
@@ -134,6 +139,18 @@ namespace ClassicChatServer
                 return;
             }
             Broadcast($"{player.ColouredName}: &f{message.Replace("%", "&")}");
+        }
+
+        public static void SetLevel(Level lvl)
+        {
+            foreach(var p in Level.PlayerList)
+            {
+                foreach (var pp in Level.PlayerList)
+                    p.SendBytes(Packet.PlayerDespawn(pp.Id));
+            }
+            Level = lvl;
+            foreach (var p in Level.PlayerList)
+                Level.AddPlayer(p);
         }
 
         public static void Shutdown()
